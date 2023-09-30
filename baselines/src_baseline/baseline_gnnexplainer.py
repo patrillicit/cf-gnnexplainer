@@ -9,24 +9,26 @@ import time
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-from torch_geometric.utils import accuracy
+#from torch_geometric.utils import accuracy
 from torch.nn.utils import clip_grad_norm
-from gnn_explainer.explainer import explain
-# from gnnexplainer import GNNExplainer
+#from gnn_explainer.explainer import explain
+from gnnexplainer import GNNExplainer
 
 
-from src.gcn import GCNSynthetic
+from src.gcn import GCNSynthetic, GCN2Layer
 from src.utils.utils import normalize_adj, get_neighbourhood, safe_open, get_degree_matrix, create_symm_matrix_from_vec, create_vec_from_symm_matrix
 from torch_geometric.utils import dense_to_sparse
 
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', default='syn1')
+parser.add_argument('--dataset', default='cora')
+parser.add_argument('--model', default='GCN2Layer')#or GCNSynthetic, GCN2Layer dont forget to change n_layers!!!
+
 
 # Based on original GCN models -- do not change
 parser.add_argument('--hidden', type=int, default=20, help='Number of hidden units.')
-parser.add_argument('--n_layers', type=int, default=3, help='Number of convolutional layers.')
+parser.add_argument('--n_layers', type=int, default=2, help='Number of convolutional layers.')
 parser.add_argument('--dropout', type=float, default=0.0, help='Dropout rate (between 0 and 1)')
 
 # For explainer
@@ -43,36 +45,64 @@ torch.manual_seed(args.seed)
 torch.autograd.set_detect_anomaly(True)
 
 
-# Import dataset from GNN explainer paper
-with open("../../data/gnn_explainer/{}.pickle".format(args.dataset[:4]), "rb") as f:
-	data = pickle.load(f)
+from data.CitationDatasets import *
+cora = get_cora()
+print(cora.data)
 
-adj = torch.Tensor(data["adj"]).squeeze()       # Does not include self loops
-features = torch.Tensor(data["feat"]).squeeze()
-labels = torch.tensor(data["labels"]).squeeze()
-idx_train = torch.tensor(data["train_idx"])
-idx_test = torch.tensor(data["test_idx"])
-edge_index = dense_to_sparse(adj)       # Needed for pytorch-geo functions
+adjMatrix = [[0 for i in range(len(cora.data.y))] for k in range(len(cora.data.y))]
 
-# Change to binary task: 0 if not in house, 1 if in house
-if args.dataset == "syn1_binary":
-	labels[labels==2] = 1
-	labels[labels==3] = 1
+# scan the arrays edge_u and edge_v
+for i in range(len(cora.data.edge_index[0])):
+	u = cora.data.edge_index[0][i]
+	v = cora.data.edge_index[1][i]
+	adjMatrix[u][v] = 1
+
+
+# For models trained using our GCN_synethic from GNNExplainer,
+# using hyperparams from GNN explainer tasks
+adj = torch.Tensor(adjMatrix).squeeze()
+features = torch.Tensor(cora.data.x).squeeze()
+labels = torch.tensor(cora.data.y).squeeze()
+
+node_idx = [i for i in range(0, len(cora.data.y))]
+idx_train = torch.masked_select(torch.Tensor(node_idx), cora.data.train_mask)
+idx_test = torch.masked_select(torch.Tensor(node_idx), cora.data.test_mask)
+idx_train = idx_train.type(torch.int64)
+idx_test = idx_test.type(torch.int64)
+
+edge_index = dense_to_sparse(adj)
+
+print(adj.shape)
+print(features.shape)
+print(labels.shape)
+print(idx_train.shape)
+print(idx_test.shape)
+print(len(edge_index))
+print("___________________")
 
 norm_adj = normalize_adj(adj)       # According to reparam trick from GCN paper
 
 
 # Set up original model, get predictions
-model = GCNSynthetic(nfeat=features.shape[1], nhid=args.hidden, nout=args.hidden,
+if args.model == "GCN2Layer":
+	model = GCN2Layer(nfeat=features.shape[1], nhid=args.hidden, nout=args.hidden,
 					 nclass=len(labels.unique()), dropout=args.dropout)
-model.load_state_dict(torch.load("../../models/gcn_3layer_{}.pt".format(args.dataset)))
+elif args.model == "GCNSynthetic":
+	model = GCNSynthetic(nfeat=features.shape[1], nhid=args.hidden, nout=args.hidden,
+						 nclass=len(labels.unique()), dropout=args.dropout)
+
+model.load_state_dict(torch.load("../models/{}_{}.pt".format(args.model, args.dataset)))
 model.eval()
 output = model(features, norm_adj)
+print(output)
 y_pred_orig = torch.argmax(output, dim=1)
+print(y_pred_orig)
 print("y_true counts: {}".format(np.unique(labels.numpy(), return_counts=True)))
 print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
-
-
+print(idx_test)
+idx_test = torch.Tensor([146, 155, 167])#([8, 88, 1, 10, 98])
+idx_test = idx_test.type(torch.int64)
+print(idx_test)
 
 # Get CF examples in test set
 test_cf_examples = []
@@ -84,21 +114,13 @@ for i in idx_test[:]:
 	new_idx = node_dict[int(i)]
 
 	# Create explainer
-	explainer = explain.Explainer(
+	explainer = GNNExplainer(
 		model=model,
-		adj=adj,
-		feat=features,
-		label=labels,
-		pred=y_pred_orig,
-		train_idx=idx_train,
-		# args=prog_args,
-		# writer=writer,
-		print_training=True,
-		# graph_mode=graph_mode,
-		# graph_idx=prog_args.graph_idx,
+		epochs=200
 	)
-	_, edge_mask = explainer.explain_node(10, x=features, adj=norm_adj, edge_index=edge_index[0])
+	_, edge_mask = explainer.explain_node(i, x=features, adj=norm_adj, edge_index=edge_index[0])
 
+	print(edge_mask)
 
 #
 # 	best_loss = np.inf

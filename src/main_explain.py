@@ -18,17 +18,17 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='cora')
 
 # Based on original GCN models -- do not change
-parser.add_argument('--hidden', type=int, default=16, help='Number of hidden units.')
+parser.add_argument('--hidden', type=int, default=64, help='Number of hidden units.')
 parser.add_argument('--n_layers', type=int, default=3, help='Number of convolutional layers.')
-parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate (between 0 and 1)')
+parser.add_argument('--dropout', type=float, default=0.0, help='Dropout rate (between 0 and 1)')
 
 # For explainer
 parser.add_argument('--seed', type=int, default=42, help='Random seed.')
-parser.add_argument('--lr', type=float, default=0.005, help='Learning rate for explainer')#0.005
+parser.add_argument('--lr', type=float, default=0.1, help='Learning rate for explainer')#0.005
 parser.add_argument('--optimizer', type=str, default="SGD", help='SGD or Adadelta')
 parser.add_argument('--n_momentum', type=float, default=0.9, help='Nesterov momentum')
-parser.add_argument('--beta', type=float, default=0.5, help='Tradeoff for dist loss')
-parser.add_argument('--num_epochs', type=int, default=20, help='Num epochs for explainer')
+parser.add_argument('--beta', type=float, default=0.8, help='Tradeoff for dist loss')
+parser.add_argument('--num_epochs', type=int, default=800, help='Num epochs for explainer')
 parser.add_argument('--device', default='cpu', help='CPU or GPU.')
 args = parser.parse_args()
 
@@ -85,11 +85,13 @@ model = GCNSynthetic(nfeat=features.shape[1], nhid=args.hidden, nout=args.hidden
 model.load_state_dict(torch.load("../models/gcn_3layer_{}.pt".format(args.dataset)))
 model.eval()
 output = model(features, norm_adj)
+print(output)
+quit()
 y_pred_orig = torch.argmax(output, dim=1)
 print("y_true counts: {}".format(np.unique(labels.numpy(), return_counts=True)))
 print("y_pred_orig counts: {}".format(np.unique(y_pred_orig.numpy(), return_counts=True)))      # Confirm model is actually doing something
 print(idx_test)
-idx_test = torch.Tensor([8,88])
+idx_test = torch.Tensor([8])#([8, 88, 1, 10, 98])
 idx_test = idx_test.type(torch.int64)
 print(idx_test)
 # Get CF examples in test set
@@ -98,6 +100,8 @@ start = time.time()
 for i in idx_test[:]:
 	sub_adj, sub_feat, sub_labels, node_dict = get_neighbourhood(int(i), edge_index, args.n_layers + 1, features, labels)
 	new_idx = node_dict[int(i)]
+	print(node_dict)
+	print(len(node_dict))
 
 	# Check that original model gives same prediction on full graph and subgraph
 	with torch.no_grad():
@@ -132,36 +136,63 @@ for i in idx_test[:]:
 	test_cf_examples.append(cf_example)
 	print(cf_example)
 
-	subg_edge_index = [[],[]]
-	print(len(cf_example[0][2]))
-	print(cf_example[0][2])
-	print(len(cf_example[0][3]))
-	cf_example[0][2] = (np.rint(cf_example[0][2])).astype(int)
-	cf_example[0][3] = (np.rint(cf_example[0][3])).astype(int)
+	if len(cf_example) != 0:
+		subg_edge_index = [[],[]]
+		print(len(cf_example[0][2]))
+		print(cf_example[0][2])
+		print(len(cf_example[0][3]))
+		cf_example[0][2] = (np.rint(cf_example[0][2])).astype(int)
+		cf_example[0][3] = (np.rint(cf_example[0][3])).astype(int)
 
-	for row in range(len(cf_example[0][2])):
-		for column in range(len(cf_example[0][2])):
-			#print(type(cf_example[0][2][row][column]))
-			#print(cf_example[0][3][row][column])
+		for row in range(len(cf_example[0][2])):
+			for column in range(len(cf_example[0][2])):
+				#print(type(cf_example[0][2][row][column]))
+				#print(cf_example[0][3][row][column])
 
 
-			if np.not_equal(cf_example[0][2][row][column],cf_example[0][3][row][column]):
-				#print(row)
-				#print(column)
-				subg_edge_index[0].append(row)
-				subg_edge_index[1].append(column)
-	print(cf_example[0][2] != cf_example[0][3])
-	print(np.count_nonzero(cf_example[0][2] == 1))
-	print(np.count_nonzero(cf_example[0][3] == 1))
+				if np.not_equal(cf_example[0][2][row][column],cf_example[0][3][row][column]):
+					#print(row)
+					#print(column)
+					subg_edge_index[0].append(row)
+					subg_edge_index[1].append(column)
+		print(cf_example[0][2] != cf_example[0][3])
+		print(np.count_nonzero(cf_example[0][2] == 1))
+		print(np.count_nonzero(cf_example[0][3] == 1))
 
-	node_subset = []
-	for i in subg_edge_index:
-		for j in i:
-			node_subset.append(j)
-	node_subset = list(dict.fromkeys(node_subset))
-	print(subg_edge_index)
-	print(node_subset)
-	print("Time for {} epochs of one example: {:.4f}min".format(args.num_epochs, (time.time() - start)/60))
+		node_subset = []
+		for i in subg_edge_index:
+			for j in i:
+				node_subset.append(j)
+		node_subset = list(dict.fromkeys(node_subset))
+		print(subg_edge_index)
+		print(node_subset)
+		print(sub_labels)
+		print(len(sub_labels))
+		node_subset_reindex = []
+		for item in node_subset:
+			node_subset_reindex.append(list(node_dict.keys())[list(node_dict.values()).index(item)])
+
+		subg_edge_index_reindex = [[],[]]
+		for col in range(len(subg_edge_index_reindex)):
+			for item in subg_edge_index[col]:
+				subg_edge_index_reindex[col].append(list(node_dict.keys())[list(node_dict.values()).index(item)])
+
+		print(node_subset_reindex)
+		print(subg_edge_index_reindex)
+		#print(cf_example[7])
+
+		from visualization.subgraph_plotting import *
+
+		colors = ["red", "orange", "yellow", "green", "blue", "purple", "grey"]
+
+		prediction_labels = []
+		prediction_prob = []
+		for item in output.tolist():
+			prediction_prob.append(max(item))
+			prediction_labels.append(item.index(max(item)))
+		draw_graph(node_index=node_subset_reindex, edge_index=subg_edge_index_reindex, y= cora.data.y, prediction=prediction_labels, colors= colors, path = r"C:\Users\Patrick\OneDrive - student.kit.edu\07 WS 22-23 BT\CF-GNN Experiments")
+
+print("Time for {} epochs of one example: {:.4f}min".format(args.num_epochs, (time.time() - start)/60))
 print("Total time elapsed: {:.4f}s".format((time.time() - start)/60))
 print("Number of CF examples found: {}/{}".format(len(test_cf_examples), len(idx_test)))
 

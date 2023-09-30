@@ -9,7 +9,7 @@ import numpy as np
 import torch.optim as optim
 from torch.nn.utils import clip_grad_norm
 from src.utils.utils import get_degree_matrix
-from .gcn_perturb import GCNSyntheticPerturb
+from .gcn_perturb import GCNSyntheticPerturb, GCN2LayerPerturb, GCN1LayerPerturb, GCN4LayerPerturb
 from src.utils.utils import normalize_adj
 
 
@@ -18,7 +18,7 @@ class CFExplainer:
 	CF Explainer class, returns counterfactual subgraph
 	"""
 	def __init__(self, model, sub_adj, sub_feat, n_hid, dropout,
-	              sub_labels, y_pred_orig, num_classes, beta, device):
+	              sub_labels, y_pred_orig, num_classes, beta, device, model_type):
 		super(CFExplainer, self).__init__()
 		self.model = model
 		self.model.eval()
@@ -31,12 +31,45 @@ class CFExplainer:
 		self.beta = beta
 		self.num_classes = num_classes
 		self.device = device
+		self.model_type = model_type
 
 		# Instantiate CF model class, load weights from original model
-		self.cf_model = GCNSyntheticPerturb(self.sub_feat.shape[1], n_hid, n_hid,
-		                                    self.num_classes, self.sub_adj, dropout, beta)
+		if self.model_type == "GCN1Layer_PyG":
+			self.cf_model = GCN1LayerPerturb(self.sub_feat.shape[1], n_hid, n_hid,
+												self.num_classes, self.sub_adj, dropout, beta)
+		elif self.model_type == "GCN2Layer" or self.model_type == "GCN2Layer_TG":
+			self.cf_model = GCN2LayerPerturb(self.sub_feat.shape[1], n_hid, n_hid,
+												self.num_classes, self.sub_adj, dropout, beta)
+		elif self.model_type == "GCNSynthetic" or self.model_type == "GCN3Layer_PyG":
+			self.cf_model = GCNSyntheticPerturb(self.sub_feat.shape[1], n_hid, n_hid,
+												self.num_classes, self.sub_adj, dropout, beta)
+		elif self.model_type == "GCN4Layer_PyG":
+			self.cf_model = GCN4LayerPerturb(self.sub_feat.shape[1], n_hid, n_hid,
+												self.num_classes, self.sub_adj, dropout, beta)
 
-		self.cf_model.load_state_dict(self.model.state_dict(), strict=False)
+		print("Accessing the model state_dict")
+		# the required architecture for the perturbed model
+		for values in self.cf_model.state_dict():
+			print(values, "\t", self.cf_model.state_dict()[values].size())
+		# the architecture how it leaves from the PyG model
+		for values in self.model.state_dict():
+			print(values, "\t", self.model.state_dict()[values].size())
+		# we change the names of the keys so that the weights and biases can be transferred from model to cf_model
+		corrected_dict = self.model.state_dict()
+		if 'gc1.lin.weight' in corrected_dict:
+			corrected_dict['gc1.weight'] = torch.transpose(corrected_dict['gc1.lin.weight'],0,1)
+		if 'gc2.lin.weight' in corrected_dict:
+			corrected_dict['gc2.weight'] = torch.transpose(corrected_dict['gc2.lin.weight'],0,1)
+		if 'gc3.lin.weight' in corrected_dict:
+			corrected_dict['gc3.weight'] = torch.transpose(corrected_dict['gc3.lin.weight'],0,1)
+
+		#print(self.model.state_dict())
+		self.cf_model.load_state_dict(corrected_dict, strict=False)
+		#print(self.cf_model.state_dict())
+
+		# the architecture ready for perturbations
+		for values in self.model.state_dict():
+			print(values, "\t", self.model.state_dict()[values].size())
 
 		# Freeze weights from original model in cf_model
 		for name, param in self.cf_model.named_parameters():
@@ -63,8 +96,8 @@ class CFExplainer:
 			self.cf_optimizer = optim.SGD(self.cf_model.parameters(), lr=lr, nesterov=True, momentum=n_momentum)
 		elif cf_optimizer == "Adadelta":
 			self.cf_optimizer = optim.Adadelta(self.cf_model.parameters(), lr=lr)
-
-
+		print("HERE:")
+		print(self.cf_model.parameters())
 		best_cf_example = []
 		best_loss = np.inf
 		num_cf_examples = 0

@@ -19,11 +19,12 @@ from utils.utils import normalize_adj
 # Defaults based on GNN Explainer
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='cora')
+parser.add_argument('--model', default='GCNSynthetic')
 parser.add_argument('--seed', type=int, default=42, help='Random seed.')
 parser.add_argument('--epochs', type=int, default=100, help='Number of epochs to train.')
 parser.add_argument('--lr', type=float, default=0.01, help='Initial learning rate.')
-parser.add_argument('--hidden', type=int, default=16, help='Number of hidden units.')
-parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate (1 - keep probability).')
+parser.add_argument('--hidden', type=int, default=64, help='Number of hidden units.')
+parser.add_argument('--dropout', type=float, default=0.0, help='Dropout rate (1 - keep probability).')
 parser.add_argument('--weight_decay', type=float, default=0.0005, help='Weight decay (L2 loss on parameters).')
 parser.add_argument('--clip', type=float, default=2.0, help='Gradient clip).')
 parser.add_argument('--device', default='cpu', help='CPU or GPU.')
@@ -61,9 +62,11 @@ idx_test = idx_test.type(torch.int64)
 print(adj.shape)
 print(features.shape)
 print(labels.shape)
+#print(idx_train)
 print(idx_train.shape)
 print(idx_test.shape)
 print("___________________")
+#print(cora.data.y[:140])
 
 norm_adj = normalize_adj(adj)
 
@@ -117,7 +120,7 @@ for epoch in range(args.epochs):
 print("Optimization Finished!")
 print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
 
-torch.save(model.state_dict(), "../models/gcn_3layer_{}".format(args.dataset) + ".pt")
+torch.save(model.state_dict(), "../models/{}_{}".format(args.model, args.dataset) + ".pt")
 
 # Testing
 y_pred = test()

@@ -20,7 +20,7 @@ def get_cora():
     return cora
 
 def get_pubmed():
-    pubmed = Planetoid(root='data/Planetoid', name='Cora', transform=transform)
+    pubmed = Planetoid(root='data/Planetoid', name='PubMed', transform=transform)
     return pubmed
 
 def get_citeseer():
